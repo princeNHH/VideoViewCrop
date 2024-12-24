@@ -20,6 +20,8 @@ import androidx.core.view.WindowInsetsCompat;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+
 import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.view.Surface;
@@ -28,6 +30,7 @@ import android.view.TextureView;
 public class MainActivity extends AppCompatActivity {
     private CenterCropVideoView videoView;
     private MediaPlayer mediaPlayer;
+    private ExecutorService executorService;
 
     @SuppressLint("MissingInflatedId")
     @Override
@@ -42,34 +45,34 @@ public class MainActivity extends AppCompatActivity {
 
         // Play the video
         List<Uri> videoUris = VideoQueryHelper.getAllVideoUris(getContentResolver());
-        playVideo(videoUris.get(1).toString());
+        prepareAndPlayVideo(videoUris.get(1).toString());
 
     }
 
-    private void playVideo(String videoPath) {
+    private void prepareAndPlayVideo(String videoPath) {
         mediaPlayer = new MediaPlayer();
-
         videoView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                try {
-                    mediaPlayer.setDataSource(MainActivity.this, android.net.Uri.parse(videoPath));
-                    mediaPlayer.setSurface(new Surface(surface));
+                executorService.execute(() -> {
+                    try {
+                        mediaPlayer.setDataSource(MainActivity.this, Uri.parse(videoPath));
+                        mediaPlayer.setSurface(new Surface(surface));
 
-                    mediaPlayer.setOnVideoSizeChangedListener((mp, videoWidth, videoHeight) -> {
-                        videoView.updateVideoSize(videoWidth, videoHeight);
-                    });
+                        mediaPlayer.setOnVideoSizeChangedListener((mp, videoWidth, videoHeight) ->
+                                MainActivity.this.runOnUiThread(() -> videoView.updateVideoSize(videoWidth, videoHeight))
+                        );
 
-                    mediaPlayer.prepare();
-                    mediaPlayer.start();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                        mediaPlayer.prepare(); // Chuẩn bị MediaPlayer trên luồng nền
+                        MainActivity.this.runOnUiThread(() -> mediaPlayer.start()); // Bắt đầu phát video trên luồng chính
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                });
             }
 
             @Override
-            public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-            }
+            public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {}
 
             @Override
             public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
@@ -81,8 +84,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-            }
+            public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
         });
     }
 
@@ -92,6 +94,9 @@ public class MainActivity extends AppCompatActivity {
         if (mediaPlayer != null) {
             mediaPlayer.release();
             mediaPlayer = null;
+        }
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdown();
         }
     }
 
